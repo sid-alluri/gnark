@@ -68,6 +68,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	}
 
 	log := logger.Logger().With().Str("curve", r1cs.CurveID().String()).Int("nbConstraints", r1cs.GetNbConstraints()).Str("backend", "groth16").Logger()
+	deeplog := logger.Logger()
 
 	commitmentInfo := r1cs.CommitmentInfo.(constraint.Groth16Commitments)
 
@@ -132,6 +133,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		return nil, err
 	}
 
+	start_fft := time.Now()
 	// H (witness reduction / FFT part)
 	var h []fr.Element
 	chHDone := make(chan struct{}, 1)
@@ -142,6 +144,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		solution.C = nil
 		chHDone <- struct{}{}
 	}()
+	deeplog.Debug().Dur("took", time.Since(start_fft)).Msg("witness reduction done (FFT)")
 
 	// we need to copy and filter the wireValues for each multi exp
 	// as pk.G1.A, pk.G1.B and pk.G2.B may have (a significant) number of point at infinity
@@ -172,6 +175,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	}()
 
 	// sample random r and s
+	start_delta := time.Now()
 	var r, s big.Int
 	var _r, _s, _kr fr.Element
 	if _, err := _r.SetRandom(); err != nil {
@@ -187,6 +191,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	// computes r[δ], s[δ], kr[δ]
 	deltas := curve.BatchScalarMultiplicationG1(&pk.G1.Delta, []fr.Element{_r, _s, _kr})
+	deeplog.Debug().Dur("took", time.Since(start_delta)).Msg("compute deltas done (MSM)")
 
 	var bs1, ar curve.G1Jac
 
@@ -194,6 +199,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	chBs1Done := make(chan error, 1)
 	computeBS1 := func() {
+		start_bs1 := time.Now()
 		<-chWireValuesB
 		if _, err := bs1.MultiExp(pk.G1.B, wireValuesB, ecc.MultiExpConfig{NbTasks: n / 2}); err != nil {
 			chBs1Done <- err
@@ -203,10 +209,12 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		bs1.AddMixed(&pk.G1.Beta)
 		bs1.AddMixed(&deltas[1])
 		chBs1Done <- nil
+		deeplog.Debug().Dur("took", time.Since(start_bs1)).Msg("compute bs1 done (MSM)")
 	}
 
 	chArDone := make(chan error, 1)
 	computeAR1 := func() {
+		start_ar1 := time.Now()
 		<-chWireValuesA
 		if _, err := ar.MultiExp(pk.G1.A, wireValuesA, ecc.MultiExpConfig{NbTasks: n / 2}); err != nil {
 			chArDone <- err
@@ -217,13 +225,14 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		ar.AddMixed(&deltas[0])
 		proof.Ar.FromJacobian(&ar)
 		chArDone <- nil
+		deeplog.Debug().Dur("took", time.Since(start_ar1)).Msg("compute ar1 done (MSM)")
 	}
 
 	chKrsDone := make(chan error, 1)
 	computeKRS := func() {
 		// we could NOT split the Krs multiExp in 2, and just append pk.G1.K and pk.G1.Z
 		// however, having similar lengths for our tasks helps with parallelism
-
+		start_krs := time.Now()
 		var krs, krs2, p1 curve.G1Jac
 		chKrs2Done := make(chan error, 1)
 		sizeH := int(pk.Domain.Cardinality - 1) // comes from the fact the deg(H)=(n-1)+(n-1)-n=n-2
@@ -272,10 +281,12 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		proof.Krs.FromJacobian(&krs)
 		chKrsDone <- nil
+		deeplog.Debug().Dur("took", time.Since(start_krs)).Msg("compute krs done (MSM)")
 	}
 
 	computeBS2 := func() error {
 		// Bs2 (1 multi exp G2 - size = len(wires))
+		start_bs2 := time.Now()
 		var Bs, deltaS curve.G2Jac
 
 		nbTasks := n
@@ -294,6 +305,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		Bs.AddMixed(&pk.G2.Beta)
 
 		proof.Bs.FromJacobian(&Bs)
+		deeplog.Debug().Dur("took", time.Since(start_bs2)).Msg("compute bs2 done (MSM)")
 		return nil
 	}
 
