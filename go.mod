@@ -1,4 +1,4 @@
-module github.com/consensys/gnark
+module github.com/sid-alluri/gnark
 
 go 1.19
 
