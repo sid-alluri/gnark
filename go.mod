@@ -1,4 +1,4 @@
-module github.com/sid-alluri/gnark
+module github.com/consensys/gnark
 
 go 1.19
 
@@ -34,3 +34,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
+
+replace github.com/consensys/gnark v0.9.1 => github.com/sid-alluri/gnark v0.0.0-20231027195303-aa675b0e256b
