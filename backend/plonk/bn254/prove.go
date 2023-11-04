@@ -125,6 +125,7 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 		return nil, fmt.Errorf("get prover options: %w", err)
 	}
 
+	NewProverBreakDown := ProverTimeBreakdown{}
 	start := time.Now()
 
 	// init instance
@@ -135,43 +136,66 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	// solve constraints
+	internal_start := time.Now()
 	g.Go(instance.solveConstraints)
-
+	NewProverBreakDown.ConstraintSolving = time.Since(internal_start)
+	
+	internal_start = time.Now()
 	// compute numerator data
 	g.Go(instance.initComputeNumerator)
+	NewProverBreakDown.PrepNumeratorData = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// complete qk
 	g.Go(instance.completeQk)
+	NewProverBreakDown.CompleteQK = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// init blinding polynomials
 	g.Go(instance.initBlindingPolynomials)
+	NewProverBreakDown.InitiateBlindingPoly = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// derive gamma, beta (copy constraint)
 	g.Go(instance.deriveGammaAndBeta)
+	NewProverBreakDown.DeriveBetaGamma = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// compute accumulating ratio for the copy constraint
 	g.Go(instance.buildRatioCopyConstraint)
+	NewProverBreakDown.ComputeAccumulatingRatio = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// compute h
 	g.Go(instance.evaluateConstraints)
+	NewProverBreakDown.ComputeH = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// open Z (blinded) at ωζ (proof.ZShiftedOpening)
 	g.Go(instance.openZ)
+	NewProverBreakDown.OpenZ = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// fold the commitment to H ([H₀] + ζᵐ⁺²*[H₁] + ζ²⁽ᵐ⁺²⁾[H₂])
 	g.Go(instance.foldH)
+	NewProverBreakDown.FoldComH = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// linearized polynomial
 	g.Go(instance.computeLinearizedPolynomial)
+	NewProverBreakDown.ComputeLinearizedPoly = time.Since(internal_start)
 
+	internal_start = time.Now()
 	// Batch opening
 	g.Go(instance.batchOpening)
+	NewProverBreakDown.BatchOpen = time.Since(internal_start)
 
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
+	ProcessJson(NewProverBreakDown, "plonk_bn254")
 	return instance.proof, nil
 }
 
