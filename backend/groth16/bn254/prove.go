@@ -69,6 +69,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 	log := logger.Logger().With().Str("curve", r1cs.CurveID().String()).Int("nbConstraints", r1cs.GetNbConstraints()).Str("backend", "groth16").Logger()
 	deeplog := logger.Logger()
+	NewProverBreakdown := ProverTimeBReakdown{}
 
 	commitmentInfo := r1cs.CommitmentInfo.(constraint.Groth16Commitments)
 
@@ -144,6 +145,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		solution.C = nil
 		chHDone <- struct{}{}
 		deeplog.Debug().Dur("took", time.Since(start_fft)).Msg("witness reduction done (FFT)")
+		NewProverBreakdown.WitnesReduction = time.Since(start_fft)
 	}()
 
 	// we need to copy and filter the wireValues for each multi exp
@@ -192,7 +194,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	// computes r[δ], s[δ], kr[δ]
 	deltas := curve.BatchScalarMultiplicationG1(&pk.G1.Delta, []fr.Element{_r, _s, _kr})
 	deeplog.Debug().Dur("took", time.Since(start_delta)).Msg("compute deltas done (MSM)")
-
+	NewProverBreakdown.ComputeDetla = time.Since(start_delta)
 	var bs1, ar curve.G1Jac
 
 	n := runtime.NumCPU()
@@ -210,6 +212,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		bs1.AddMixed(&deltas[1])
 		chBs1Done <- nil
 		deeplog.Debug().Dur("took", time.Since(start_bs1)).Msg("compute bs1 done (MSM)")
+		NewProverBreakdown.ComputeBS1 = time.Since(start_bs1)
 	}
 
 	chArDone := make(chan error, 1)
@@ -226,6 +229,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		proof.Ar.FromJacobian(&ar)
 		chArDone <- nil
 		deeplog.Debug().Dur("took", time.Since(start_ar1)).Msg("compute ar1 done (MSM)")
+		NewProverBreakdown.ComputeAR1 = time.Since(start_ar1)
 	}
 
 	chKrsDone := make(chan error, 1)
@@ -281,7 +285,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		proof.Krs.FromJacobian(&krs)
 		chKrsDone <- nil
+	
 		deeplog.Debug().Dur("took", time.Since(start_krs)).Msg("compute krs done (MSM)")
+		NewProverBreakdown.ComputeKRS = time.Since(start_krs)
 	}
 
 	computeBS2 := func() error {
@@ -306,6 +312,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 
 		proof.Bs.FromJacobian(&Bs)
 		deeplog.Debug().Dur("took", time.Since(start_bs2)).Msg("compute bs2 done (MSM)")
+		NewProverBreakdown.ComputeBS2 = time.Since(start_bs2)
 		return nil
 	}
 
@@ -326,7 +333,8 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	}
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
-
+	NewProverBreakdown.Total = time.Since(start)
+	ProcessJson(NewProverBreakdown, "groth16_bn254")
 	return proof, nil
 }
 
