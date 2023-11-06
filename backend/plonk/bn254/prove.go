@@ -195,6 +195,7 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
+	NewProverBreakDown.Total = time.Since(start)
 	ProcessJson(NewProverBreakDown, "plonk_bn254")
 	return instance.proof, nil
 }
