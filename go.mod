@@ -35,4 +35,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/consensys/gnark v0.9.1 => github.com/sid-alluri/gnark v0.0.0-20231106035259-6e2575e7ca73
+replace github.com/consensys/gnark v0.9.1 => github.com/sid-alluri/gnark v0.0.0-20231123012650-a25593e1fc34
