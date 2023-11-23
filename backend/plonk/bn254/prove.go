@@ -125,7 +125,6 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 		return nil, fmt.Errorf("get prover options: %w", err)
 	}
 
-	NewProverBreakDown := ProverTimeBreakdown{}
 	start := time.Now()
 
 	// init instance
@@ -136,67 +135,45 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	// solve constraints
-	internal_start := time.Now()
 	g.Go(instance.solveConstraints)
-	NewProverBreakDown.ConstraintSolving = time.Since(internal_start)
 	
-	internal_start = time.Now()
 	// compute numerator data
 	g.Go(instance.initComputeNumerator)
-	NewProverBreakDown.PrepNumeratorData = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// complete qk
 	g.Go(instance.completeQk)
-	NewProverBreakDown.CompleteQK = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// init blinding polynomials
 	g.Go(instance.initBlindingPolynomials)
-	NewProverBreakDown.InitiateBlindingPoly = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// derive gamma, beta (copy constraint)
 	g.Go(instance.deriveGammaAndBeta)
-	NewProverBreakDown.DeriveBetaGamma = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// compute accumulating ratio for the copy constraint
 	g.Go(instance.buildRatioCopyConstraint)
-	NewProverBreakDown.ComputeAccumulatingRatio = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// compute h
 	g.Go(instance.evaluateConstraints)
-	NewProverBreakDown.ComputeH = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// open Z (blinded) at ωζ (proof.ZShiftedOpening)
 	g.Go(instance.openZ)
-	NewProverBreakDown.OpenZ = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// fold the commitment to H ([H₀] + ζᵐ⁺²*[H₁] + ζ²⁽ᵐ⁺²⁾[H₂])
 	g.Go(instance.foldH)
-	NewProverBreakDown.FoldComH = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// linearized polynomial
 	g.Go(instance.computeLinearizedPolynomial)
-	NewProverBreakDown.ComputeLinearizedPoly = time.Since(internal_start)
 
-	internal_start = time.Now()
 	// Batch opening
 	g.Go(instance.batchOpening)
-	NewProverBreakDown.BatchOpen = time.Since(internal_start)
 
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
-	NewProverBreakDown.Total = time.Since(start)
-	ProcessJson(NewProverBreakDown, "plonk_bn254")
+	instance.breakdown.Total = time.Since(start)
+	ProcessJson(instance.breakdown, "plonk_bn254")
 	return instance.proof, nil
 }
 
@@ -250,6 +227,9 @@ type instance struct {
 	chFoldedH,
 	chNumeratorInit,
 	chGammaBeta chan struct{}
+
+	//breakdown
+	breakdown ProverTimeBreakdown
 }
 
 func newInstance(ctx context.Context, spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts *backend.ProverConfig) (*instance, error) {
@@ -287,6 +267,8 @@ func newInstance(ctx context.Context, spr *cs.SparseR1CS, pk *ProvingKey, fullWi
 }
 
 func (s *instance) initComputeNumerator() error {
+	internal_start := time.Now()
+
 	n := s.pk.Domain[0].Cardinality
 	s.cres = make([]fr.Element, s.pk.Domain[1].Cardinality)
 	s.twiddles0 = make([]fr.Element, n)
@@ -312,16 +294,19 @@ func (s *instance) initComputeNumerator() error {
 	fft.BitReverse(s.twiddlesRev)
 
 	close(s.chNumeratorInit)
-
+	
+	s.breakdown.PrepNumeratorData = time.Since(internal_start)
 	return nil
 }
 
 func (s *instance) initBlindingPolynomials() error {
+	internal_start := time.Now()
 	s.bp[id_Bl] = getRandomPolynomial(order_blinding_L)
 	s.bp[id_Br] = getRandomPolynomial(order_blinding_R)
 	s.bp[id_Bo] = getRandomPolynomial(order_blinding_O)
 	s.bp[id_Bz] = getRandomPolynomial(order_blinding_Z)
 	close(s.chbp)
+	s.breakdown.InitiateBlindingPoly = time.Since(internal_start)
 	return nil
 }
 
@@ -389,10 +374,14 @@ func (s *instance) setupGKRHints() {
 // solveConstraints computes the evaluation of the polynomials L, R, O
 // and sets x[id_L], x[id_R], x[id_O] in canonical form
 func (s *instance) solveConstraints() error {
+	
+	internal_start := time.Now()
+
 	_solution, err := s.spr.Solve(s.fullWitness, s.opt.SolverOpts...)
 	if err != nil {
 		return err
 	}
+
 	solution := _solution.(*cs.SparseR1CSSolution)
 	evaluationLDomainSmall := []fr.Element(solution.L)
 	evaluationRDomainSmall := []fr.Element(solution.R)
@@ -417,10 +406,13 @@ func (s *instance) solveConstraints() error {
 		return err
 	}
 	close(s.chLRO)
+
+	s.breakdown.ConstraintSolving = time.Since(internal_start)
 	return nil
 }
 
 func (s *instance) completeQk() error {
+	internal_start := time.Now()
 	qk := s.pk.trace.Qk.Clone().ToLagrange(&s.pk.Domain[0]).ToRegular()
 	qkCoeffs := qk.Coefficients()
 
@@ -444,6 +436,7 @@ func (s *instance) completeQk() error {
 
 	s.x[id_Qk] = qk
 	close(s.chQk)
+	s.breakdown.CompleteQK = time.Since(internal_start)
 
 	return nil
 }
@@ -478,6 +471,7 @@ func (s *instance) commitToLRO() error {
 
 // deriveGammaAndBeta (copy constraint)
 func (s *instance) deriveGammaAndBeta() error {
+	internal_start := time.Now()
 	wWitness, ok := s.fullWitness.Vector().(fr.Vector)
 	if !ok {
 		return witness.ErrInvalidWitness
@@ -507,7 +501,7 @@ func (s *instance) deriveGammaAndBeta() error {
 	s.beta.SetBytes(bbeta)
 
 	close(s.chGammaBeta)
-
+	s.breakdown.DeriveBetaGamma = time.Since(internal_start)
 	return nil
 }
 
@@ -544,6 +538,7 @@ func (s *instance) deriveZeta() (err error) {
 
 // evaluateConstraints computes H
 func (s *instance) evaluateConstraints() (err error) {
+	internal_start := time.Now()
 	// clone polys from the proving key.
 	s.x[id_Ql] = s.pk.trace.Ql.Clone()
 	s.x[id_Qr] = s.pk.trace.Qr.Clone()
@@ -619,11 +614,12 @@ func (s *instance) evaluateConstraints() (err error) {
 	}
 
 	close(s.chH)
-
+	s.breakdown.ComputeH = time.Since(internal_start)
 	return nil
 }
 
 func (s *instance) buildRatioCopyConstraint() (err error) {
+	internal_start := time.Now()
 	// wait for gamma and beta to be derived (or ctx.Done())
 	select {
 	case <-s.ctx.Done():
@@ -653,12 +649,14 @@ func (s *instance) buildRatioCopyConstraint() (err error) {
 	s.proof.Z, err = s.commitToPolyAndBlinding(s.x[id_Z], s.bp[id_Bz])
 
 	close(s.chZ)
+	s.breakdown.ComputeAccumulatingRatio = time.Since(internal_start)
 
 	return
 }
 
 // open Z (blinded) at ωζ
 func (s *instance) openZ() (err error) {
+	internal_start := time.Now()
 	// wait for H to be committed and zeta to be derived (or ctx.Done())
 	select {
 	case <-s.ctx.Done():
@@ -674,6 +672,7 @@ func (s *instance) openZ() (err error) {
 		return err
 	}
 	close(s.chZOpening)
+	s.breakdown.OpenZ = time.Since(internal_start)
 	return nil
 }
 
@@ -694,6 +693,7 @@ func (s *instance) h3() []fr.Element {
 
 // fold the commitment to H ([H₀] + ζᵐ⁺²*[H₁] + ζ²⁽ᵐ⁺²⁾[H₂])
 func (s *instance) foldH() error {
+	internal_start := time.Now()
 	// wait for H to be committed and zeta to be derived (or ctx.Done())
 	select {
 	case <-s.ctx.Done():
@@ -726,12 +726,12 @@ func (s *instance) foldH() error {
 	}
 
 	close(s.chFoldedH)
-
+	s.breakdown.FoldComH = time.Since(internal_start)
 	return nil
 }
 
 func (s *instance) computeLinearizedPolynomial() error {
-
+	internal_start := time.Now()
 	// wait for H to be committed and zeta to be derived (or ctx.Done())
 	select {
 	case <-s.ctx.Done():
@@ -797,10 +797,12 @@ func (s *instance) computeLinearizedPolynomial() error {
 		return err
 	}
 	close(s.chLinearizedPolynomial)
+	s.breakdown.ComputeLinearizedPoly = time.Since(internal_start)
 	return nil
 }
 
 func (s *instance) batchOpening() error {
+	internal_start := time.Now()
 	polysQcp := coefficients(s.pk.trace.Qcp)
 	polysToOpen := make([][]fr.Element, 7+len(polysQcp))
 	copy(polysToOpen[7:], polysQcp)
@@ -854,7 +856,7 @@ func (s *instance) batchOpening() error {
 		s.pk.Kzg,
 		s.proof.ZShiftedOpening.ClaimedValue.Marshal(),
 	)
-
+	s.breakdown.BatchOpen = time.Since(internal_start)
 	return err
 }
 
