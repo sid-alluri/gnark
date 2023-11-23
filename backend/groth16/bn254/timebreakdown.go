@@ -18,6 +18,7 @@ type ProverTimeBReakdown struct {
 }
 
 func ProcessJson(Input ProverTimeBReakdown, system string) {
+
 	currentTime := time.Now()
 	outputpath := fmt.Sprint(currentTime.Unix()) + system + "prover_timebreakdown.json"
 	jsonfile, _ := json.MarshalIndent(Input, "", " ")

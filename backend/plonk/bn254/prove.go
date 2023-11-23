@@ -125,7 +125,6 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 		return nil, fmt.Errorf("get prover options: %w", err)
 	}
 
-	start := time.Now()
 
 	// init instance
 	g, ctx := errgroup.WithContext(context.Background())
@@ -136,6 +135,8 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 
 	// solve constraints
 	g.Go(instance.solveConstraints)
+	
+	start := time.Now()
 	
 	// compute numerator data
 	g.Go(instance.initComputeNumerator)
@@ -375,13 +376,12 @@ func (s *instance) setupGKRHints() {
 // and sets x[id_L], x[id_R], x[id_O] in canonical form
 func (s *instance) solveConstraints() error {
 	
-	internal_start := time.Now()
 
 	_solution, err := s.spr.Solve(s.fullWitness, s.opt.SolverOpts...)
 	if err != nil {
 		return err
 	}
-
+	internal_start := time.Now()
 	solution := _solution.(*cs.SparseR1CSSolution)
 	evaluationLDomainSmall := []fr.Element(solution.L)
 	evaluationRDomainSmall := []fr.Element(solution.R)
